@@ -1,2 +1,6 @@
-pickled_files/*
+**/logs
+**/scores
+**/models
 logs/*
+**/pickled_files
+pickled_files/*
