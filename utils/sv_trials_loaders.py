@@ -369,14 +369,14 @@ def dataset_from_sre08_10_trial(trials, id_to_num_dict, utts_dict, batch_size = 
     return dataset
 
 
-def load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2):
+def load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2, device):
     data1_xvec, data2_xvec = [],[] #torch.tensor([[]]), torch.tensor([[]])
     for i, (d1, d2) in enumerate(zip(data1, data2)):
         data1_xvec_temp, data2_xvec_temp =  mega_xvec_dict[num_to_id_dict[int(d1)]], mega_xvec_dict[num_to_id_dict[int(d2)]]
         data1_xvec.append(data1_xvec_temp)
         data2_xvec.append(data2_xvec_temp)
-    tensor_X1 = torch.from_numpy(np.asarray(data1_xvec)).float() 
-    tensor_X2 = torch.from_numpy(np.asarray(data2_xvec)).float() 
+    tensor_X1 = torch.from_numpy(np.asarray(data1_xvec)).float().to(device) 
+    tensor_X2 = torch.from_numpy(np.asarray(data2_xvec)).float().to(device)
     return tensor_X1, tensor_X2
 
 def dataloader_from_trials_list(trial_file_paths_list, enroll_spk2xvectors_list, test_xvectors_list, batch_size = 2048, shuffle=True):

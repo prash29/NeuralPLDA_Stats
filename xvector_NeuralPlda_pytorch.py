@@ -35,10 +35,10 @@ logging.basicConfig(filename='logs/kaldiplda_{}.log'.format(timestamp),
 
 
             
-class NeuralPlda(nn.Module):
-    def __init__(self, xdim=512, LDA_dim=170, PLDA_dim=170, device=torch.device("cuda")):
-        super(NeuralPlda, self).__init__()
-        self.centering_and_LDA = nn.Linear(xdim, LDA_dim) #Centering, wccn
+class NeuralPldaFromStats(nn.Module):
+    def __init__(self, sdim=3000, LDA_dim=170, PLDA_dim=170, device=torch.device("cuda")):
+        super(NeuralPldaFromStats, self).__init__()
+        self.centering_and_LDA = nn.Linear(sdim, LDA_dim) #Centering, wccn
         self.centering_and_wccn_plda = nn.Linear(LDA_dim, PLDA_dim)
         self.P_sqrt = nn.Parameter(torch.rand(PLDA_dim,requires_grad=True))
         self.Q = nn.Parameter(torch.rand(PLDA_dim,requires_grad=True))
@@ -61,13 +61,18 @@ class NeuralPlda(nn.Module):
 
         return S
     
-    def LoadPldaParamsFromKaldi(self, mean_vec_file, transform_mat_file, PldaFile):
+    def LoadPldaParamsFromKaldi(self, mean_vec_file, transform_mat_file, PldaFile, FinalXvecPkl):
         plda = kaldiPlda2numpydict(PldaFile)
         transform_mat = np.asarray([w.split() for w in np.asarray(subprocess.check_output(["copy-matrix","--binary=false", transform_mat_file, "-"]).decode('utf-8').strip()[2:-2].split('\n'))]).astype(float)
         mean_vec = np.asarray(subprocess.check_output(["copy-vector", "--binary=false",mean_vec_file, "-"]).decode('utf-8').strip()[1:-2].split()).astype(float)
+        xvec_mdl = pickle.load(open(FinalXvecPkl,'rb'))
+        w1 = xvec_mdl['tdnn11.affine']['params']
+        b1 = xvec_mdl['tdnn11.affine']['bias']
+        w2 = transform_mat[:,:-1]
+        b2 = transform_mat[:,-1]-transform_mat[:,:-1].dot(mean_vec)
         mdsd = self.state_dict()
-        mdsd['centering_and_LDA.weight'].data.copy_(torch.from_numpy(transform_mat[:,:-1]).float())
-        mdsd['centering_and_LDA.bias'].data.copy_(torch.from_numpy(transform_mat[:,-1]-transform_mat[:,:-1].dot(mean_vec)).float())
+        mdsd['centering_and_LDA.weight'].data.copy_(torch.from_numpy(w2.dot(w1)).float())
+        mdsd['centering_and_LDA.bias'].data.copy_(torch.from_numpy(w2.dot(b1)+b2).float())
         mdsd['centering_and_wccn_plda.weight'].data.copy_(torch.from_numpy(plda['diagonalizing_transform']).float())
         mdsd['centering_and_wccn_plda.bias'].data.copy_(torch.from_numpy(-plda['diagonalizing_transform'].dot(plda['plda_mean'])).float())
         mdsd['P_sqrt'].data.copy_(torch.from_numpy(np.sqrt(plda['diagP'])).float())
@@ -77,6 +82,7 @@ class NeuralPlda(nn.Module):
         with open(filename,'wb') as f:
             pickle.dump(self,f)
         
+        
 
 def train(args, model, device, train_loader, mega_xvec_dict, num_to_id_dict, optimizer, epoch, ):    
     model.train()
@@ -84,7 +90,7 @@ def train(args, model, device, train_loader, mega_xvec_dict, num_to_id_dict, opt
     crossentropies = []
     for batch_idx, (data1, data2, target) in enumerate(train_loader):    
         data1, data2, target = data1.to(device), data2.to(device), target.to(device)
-        data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2)
+        data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2, device)
         optimizer.zero_grad()
         output = model(data1_xvec, data2_xvec)
         sigmoid = nn.Sigmoid()
@@ -129,7 +135,7 @@ def validate(args, model, device, mega_xvec_dict, num_to_id_dict, data_loader):
     with torch.no_grad():
         for data1, data2, target in data_loader:
             data1, data2, target = data1.to(device), data2.to(device), target.to(device)
-            data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2) #mega_xvec_dict[num_to_id_dict[data1]], mega_xvec_dict[num_to_id_dict[data2]]
+            data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2, device) #mega_xvec_dict[num_to_id_dict[data1]], mega_xvec_dict[num_to_id_dict[data2]]
             output = model(data1_xvec,data2_xvec)
             sigmoid = nn.Sigmoid()
             test_loss += F.binary_cross_entropy(sigmoid(output-min_cent_threshold), target).item()
@@ -167,7 +173,7 @@ def validate(args, model, device, mega_xvec_dict, num_to_id_dict, data_loader):
     logging.info('\nTest set: Pmiss2: {:.2f}\n'.format(Pmiss2))
     logging.info('\nTest set: C_det(149): {:.2f}\n'.format(Cdet))
     return Cdet, minC_threshold1, minC_threshold2, min_cent_threshold
-
+    
 
 
 def compute_minc_threshold(args, model, device, mega_xvec_dict, num_to_id_dict, data_loader):
@@ -177,7 +183,7 @@ def compute_minc_threshold(args, model, device, mega_xvec_dict, num_to_id_dict, 
         targets, scores = np.asarray([]), np.asarray([])
         for data1, data2, target in data_loader:
             data1, data2, target = data1.to(device1), data2.to(device1), target.to(device1)
-            data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2)
+            data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2, device1)
             targets = np.concatenate((targets, np.asarray(target)))
             scores = np.concatenate((scores, np.asarray(model.forward(data1_xvec,data2_xvec))))
     minC_threshold1, minC_threshold2, min_cent_threshold = get_cmn2_thresholds(scores,targets)
@@ -311,7 +317,7 @@ def main_kaldiplda():
     ###########################################################################
     
     
-    model = NeuralPlda().to(device)
+    model = NeuralPldaFromStats().to(device)
     ## Uncomment to initialize with a pickled pretrained model or a Kaldi PLDA model 
     
     # model = pickle.load(open('/home/data2/SRE2019/shreyasr/X/models/kaldi_pldaNet_sre0410_swbd_16_16.swbdsremx6epoch.1571651491.pt','rb'))
@@ -340,9 +346,9 @@ def main_kaldiplda():
         logging.info("SRE16_18_dev_eval Trials:")
         valloss, minC_threshold1, minC_threshold2, min_cent_threshold  = validate(args, model, device, mega_xvec_dict, num_to_id_dict, sre18_dev_trials_loader)
         all_losses.append(valloss)
-        model.SaveModel("models/kaldi_pldaNet_sre0410_swbd_16_{}.swbdsremx6epoch.{}.pt".format(epoch,timestamp))
+        model.SaveModel("models/kaldi_NeuralPLDA_Stats_sre0410_swbd_16_{}.swbdsremx6epoch.{}.pt".format(epoch,timestamp))
         print("Generating scores for Epoch ",epoch)       
-        generate_scores_in_batches("scores/scores_kaldipldanet_CUDA_Random{}_{}.txt".format(epoch,timestamp), device, sre18_dev_trials_file_path, sre18_dev_xv_pairs_1, sre18_dev_xv_pairs_2, model)
+        generate_scores_in_batches("scores/scores_NeuralPLDA_Stats_CUDA_Random{}_{}.txt".format(epoch,timestamp), device, sre18_dev_trials_file_path, sre18_dev_xv_pairs_1, sre18_dev_xv_pairs_2, model)
         try:
             if all_losses[-1] < bestloss:
                 bestloss = all_losses[-1]
