@@ -16,8 +16,8 @@ import torch.optim as optim
 import numpy as np
 import pickle
 import subprocess
-
-from utils.sv_trials_loaders import dataloader_from_trial, get_spk2xvector, generate_scores_from_net, generate_scores_in_batches, xv_pairs_from_trial, concatenate_datasets, get_train_dataset, dataset_from_trial, dataset_from_sre08_10_trial
+from pdb import set_trace as bp
+from utils.sv_trials_loaders import dataloader_from_trial, get_spk2xvector, generate_scores_from_net, generate_scores_in_batches, xv_pairs_from_trial, concatenate_datasets, get_train_dataset, dataset_from_trial, dataset_from_sre08_10_trial, load_xvec_from_batch
 from utils.calibration import get_cmn2_thresholds
 from utils.Kaldi2NumpyUtils.kaldiPlda2numpydict import kaldiPlda2numpydict
 
@@ -78,15 +78,15 @@ class NeuralPlda(nn.Module):
             pickle.dump(self,f)
         
 
-    
-def train(args, model, device, train_loader, optimizer, epoch):    
+def train(args, model, device, train_loader, mega_xvec_dict, num_to_id_dict, optimizer, epoch, ):    
     model.train()
     softcdets = []
     crossentropies = []
     for batch_idx, (data1, data2, target) in enumerate(train_loader):    
         data1, data2, target = data1.to(device), data2.to(device), target.to(device)
+        data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2)
         optimizer.zero_grad()
-        output = model(data1, data2)
+        output = model(data1_xvec, data2_xvec)
         sigmoid = nn.Sigmoid()
         loss1 = (sigmoid(model.alpha*(model.threshold1-output))*target).sum()/(target.sum()) + 99*(sigmoid(model.alpha*(output-model.threshold1))*(1-target)).sum()/((1-target).sum())
         loss2 = (sigmoid(model.alpha*(model.threshold2-output))*target).sum()/(target.sum()) + 199*(sigmoid(model.alpha*(output-model.threshold2))*(1-target)).sum()/((1-target).sum())
@@ -115,9 +115,9 @@ def train(args, model, device, train_loader, optimizer, epoch):
             
 
 
-def validate(args, model, device, data_loader):
+def validate(args, model, device, mega_xvec_dict, num_to_id_dict, data_loader):
     model.eval()
-    minC_threshold1, minC_threshold2, min_cent_threshold = compute_minc_threshold(args, model, device, data_loader)
+    minC_threshold1, minC_threshold2, min_cent_threshold = compute_minc_threshold(args, model, device, mega_xvec_dict, num_to_id_dict, data_loader)
     test_loss = 0
     correct = 0
     fa1 = 0
@@ -129,7 +129,8 @@ def validate(args, model, device, data_loader):
     with torch.no_grad():
         for data1, data2, target in data_loader:
             data1, data2, target = data1.to(device), data2.to(device), target.to(device)
-            output = model(data1,data2)
+            data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2) #mega_xvec_dict[num_to_id_dict[data1]], mega_xvec_dict[num_to_id_dict[data2]]
+            output = model(data1_xvec,data2_xvec)
             sigmoid = nn.Sigmoid()
             test_loss += F.binary_cross_entropy(sigmoid(output-min_cent_threshold), target).item()
             correct_preds = (((output-min_cent_threshold)>0).float()==target).float()
@@ -169,15 +170,16 @@ def validate(args, model, device, data_loader):
 
 
 
-def compute_minc_threshold(args, model, device, data_loader):
+def compute_minc_threshold(args, model, device, mega_xvec_dict, num_to_id_dict, data_loader):
     device1=torch.device('cpu')
     model = model.to(device1)
     with torch.no_grad():
         targets, scores = np.asarray([]), np.asarray([])
         for data1, data2, target in data_loader:
             data1, data2, target = data1.to(device1), data2.to(device1), target.to(device1)
+            data1_xvec, data2_xvec = load_xvec_from_batch(mega_xvec_dict, num_to_id_dict, data1, data2)
             targets = np.concatenate((targets, np.asarray(target)))
-            scores = np.concatenate((scores, np.asarray(model.forward(data1,data2))))
+            scores = np.concatenate((scores, np.asarray(model.forward(data1_xvec,data2_xvec))))
     minC_threshold1, minC_threshold2, min_cent_threshold = get_cmn2_thresholds(scores,targets)
     model = model.to(device)
     return minC_threshold1, minC_threshold2, min_cent_threshold
@@ -238,6 +240,9 @@ def main_kaldiplda():
     ###########################################################################
     
     datasets=[]
+    mega_xvec_dict = pickle.load(open('pickled_files/mega_xvec_dict.pkl','rb'))
+    num_to_id_dict = {i:j for i,j in enumerate(list(mega_xvec_dict))}
+    id_to_num_dict = {v:k for k,v in num_to_id_dict.items()}
     
     data_dir_list = np.asarray([['/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre2004/male','5'],
                                 ['/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre2004/female','5'],
@@ -251,46 +256,55 @@ def main_kaldiplda():
                                 ['/home/data2/SRE2019/prashantk/voxceleb/v3/data/mx6/grepd/female','5']])
     
 
-    xvector_scp_list = np.asarray(['/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_swbd/xvector_fullpaths.scp',
-                                   '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre/xvector_fullpaths.scp',
-                                   '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_mx6/xvector_fullpaths.scp'])
-
-    train_set = get_train_dataset(data_dir_list, xvector_scp_list, batch_size=2048)
-    datasets.append(train_set)
+    xvector_scp_list = np.asarray(['/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_swbd/xvector_fullpaths.scp',
+                                   '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre/xvector_fullpaths.scp',
+                                   '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_mx6/xvector_fullpaths.scp'])
     
+    train_set = get_train_dataset(data_dir_list, xvector_scp_list,id_to_num_dict, batch_size=2048)
+    datasets.append(train_set)
     
     # NOTE: 'xvectors.pkl' files are generated using utils/Kaldi2NumpyUtils/kaldivec2numpydict.py
     
     trial_file_path = "/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre18_dev_test/trials"
     enroll_spk2utt_path = "/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre18_dev_enrollment/spk2utt"
-    enroll_xvector_path = "/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre18_dev_enrollment/xvectors.pkl"
-    test_xvector_path = "/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre18_dev_test/xvectors.pkl"
+    enroll_xvector_path = "/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre18_dev_enrollment/xvectors.pkl"
+    test_xvector_path = "/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre18_dev_test/xvectors.pkl"
     enroll_spk2xvector = get_spk2xvector(enroll_spk2utt_path,enroll_xvector_path)
     test_xvectors = pickle.load(open(test_xvector_path,'rb'))
-    sre18_dev_trials_loader = dataloader_from_trial(trial_file_path, enroll_spk2xvector, test_xvectors, batch_size = 2048, shuffle=True)
+#    mega_xvec_dict.update(enroll_spk2xvector)
+#    mega_xvec_dict.update(test_xvectors)
+    sre18_dev_trials_loader = dataloader_from_trial(trial_file_path, id_to_num_dict, batch_size = 2048, shuffle=True)
     sre18_dev_xv_pairs_1,sre18_dev_xv_pairs_2 = xv_pairs_from_trial(trial_file_path, enroll_spk2xvector, test_xvectors)
     
 
     trial_file_path = "/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre16_eval_test/trials"
-    enroll_spk2utt_path="/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre16_eval_enrollment/spk2utt"
-    enroll_xvector_path="/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre16_eval_enrollment/xvectors.pkl"
-    test_xvector_path="/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre16_eval_test/xvectors.pkl"
-    enroll_spk2xvector = get_spk2xvector(enroll_spk2utt_path,enroll_xvector_path)
-    test_xvectors = pickle.load(open(test_xvector_path,'rb'))
-    sre16_eval_trials_dataset = dataset_from_trial(trial_file_path, enroll_spk2xvector, test_xvectors, batch_size = 2048, shuffle=True)
+#    enroll_spk2utt_path="/home/data2/SRE2019/prashantk/voxceleb/v3/data/sre16_eval_enrollment/spk2utt"
+#    enroll_xvector_path="/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre16_eval_enrollment/xvectors.pkl"
+#    test_xvector_path="/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre16_eval_test/xvectors.pkl"
+#    enroll_spk2xvector = get_spk2xvector(enroll_spk2utt_path,enroll_xvector_path)
+#    test_xvectors = pickle.load(open(test_xvector_path,'rb'))
+#    mega_xvec_dict.update(enroll_spk2xvector)
+#    mega_xvec_dict.update(test_xvectors)
+    sre16_eval_trials_dataset = dataset_from_trial(trial_file_path, id_to_num_dict, batch_size = 2048, shuffle=True)
     datasets.append(sre16_eval_trials_dataset)
 
         
     trials_08, enroll_xvectors_08, enroll_model2xvector_08, all_utts_dict_08 = get_sre08_trials_etc()
-    sre08_dataset = dataset_from_sre08_10_trial(trials_08, enroll_model2xvector_08, enroll_xvectors_08, all_utts_dict_08, batch_size = 2048, shuffle=True)
-    
+    sre08_dataset = dataset_from_sre08_10_trial(trials_08, id_to_num_dict, all_utts_dict_08, batch_size = 2048, shuffle=True)
+#    mega_xvec_dict.update(enroll_model2xvector_08)
+#    mega_xvec_dict.update(enroll_xvectors_08)
     datasets.append(sre08_dataset)
     
     trials_10, enroll_xvectors_10, enroll_model2xvector_10, all_utts_dict_10 = get_sre10_trials_etc()
-    sre10_dataset = dataset_from_sre08_10_trial(trials_10, enroll_model2xvector_10, enroll_xvectors_10, all_utts_dict_10, batch_size = 2048, shuffle=True)
+    sre10_dataset = dataset_from_sre08_10_trial(trials_10, id_to_num_dict, all_utts_dict_10, batch_size = 2048, shuffle=True)
+#    mega_xvec_dict.update(enroll_model2xvector_10)
+#    mega_xvec_dict.update(enroll_xvectors_10)
     datasets.append(sre10_dataset)
     
+#    pickle.dump(mega_xvec_dict, open('pickled_files/mega_xvec_dict.pkl','wb'))
+
     train_loader = concatenate_datasets(datasets,batch_size=2048)
+
     
     ###########################################################################
     # Fishished generating training data loaders
@@ -315,15 +329,16 @@ def main_kaldiplda():
     
     print("SRE18_Dev Trials:")
     logging.info("SRE16_18_dev_eval Trials:")
-    valloss, minC_threshold1, minC_threshold2, min_cent_threshold  = validate(args, model, device, sre18_dev_trials_loader)
+    bp()
+    valloss, minC_threshold1, minC_threshold2, min_cent_threshold  = validate(args, model, device, mega_xvec_dict, num_to_id_dict, sre18_dev_trials_loader)
     all_losses.append(valloss)
 
     
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
+        train(args, model, device, train_loader, mega_xvec_dict, num_to_id_dict, optimizer, epoch)
         print("SRE16_18_dev_eval Trials:")
         logging.info("SRE16_18_dev_eval Trials:")
-        valloss, minC_threshold1, minC_threshold2, min_cent_threshold  = validate(args, model, device, sre18_dev_trials_loader)
+        valloss, minC_threshold1, minC_threshold2, min_cent_threshold  = validate(args, model, device, mega_xvec_dict, num_to_id_dict, sre18_dev_trials_loader)
         all_losses.append(valloss)
         model.SaveModel("models/kaldi_pldaNet_sre0410_swbd_16_{}.swbdsremx6epoch.{}.pt".format(epoch,timestamp))
         print("Generating scores for Epoch ",epoch)       

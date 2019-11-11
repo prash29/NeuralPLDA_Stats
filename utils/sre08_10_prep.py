@@ -50,7 +50,7 @@ def get_enrollmodel2xvector(model_key_dict, all_utts_dict, enroll_xvectors):
     return enrollmodel2xvector
 
 def get_sre08_trials_etc():
-    xvector_scp_file = '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre08/xvector.scp'
+    xvector_scp_file = '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre08/xvector.scp'
     trials_key_file = '/home/data/SRE08_TEST/export/corpora5/LDC/LDC2011S08/data/keys/NIST_SRE08_KEYS.v0.1/trial-keys/NIST_SRE08_ALL.trial.key'
     #model_ids_file = '/home/data/SRE08_TEST/export/corpora5/LDC/LDC2011S08/data/keys/NIST_SRE08_KEYS.v0.1/trial-keys/model_ids.lst'
     model_key_file = '/home/data/SRE08_TEST/export/corpora5/LDC/LDC2011S08/data/keys/NIST_SRE08_KEYS.v0.1/model-keys/NIST_SRE08_ALL.model.key'
@@ -67,8 +67,10 @@ def get_sre08_trials_etc():
     
     trials = [[w[0], w[1]+'_'+w[2], w[3]] for w in trials_key]
     
-    enroll_xvectors = kaldivec2numpydict('/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre08/xvector_fullpaths.scp')
-    enrollmodel2xvector = get_enrollmodel2xvector(model_key_dict, all_utts_dict, enroll_xvectors)
+#    enroll_xvectors = kaldivec2numpydict('/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre08/xvector_fullpaths.scp')
+#    enrollmodel2xvector = get_enrollmodel2xvector(model_key_dict, all_utts_dict, enroll_xvectors)
+    enroll_xvectors = []
+    enrollmodel2xvector = []
     return trials,enroll_xvectors, enrollmodel2xvector,all_utts_dict
 
 def get_sre18_dev_vast_trials_etc():
@@ -97,7 +99,7 @@ def get_sre18_dev_vast_trials_etc():
 
 
 def get_sre10_trials_etc():
-    xvector_scp_file_10 = '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre10/xvector.scp'
+    xvector_scp_file_10 = '/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre10/xvector.scp'
     trials_key_file_10 = '/home/data/SRE10/export/corpora5/SRE/SRE2010/eval/keys/NIST_SRE10_ALL.trial.key'
     #model_ids_file_10 = '/home/data/SRE08_TEST/export/corpora5/LDC/LDC2011S08/data/keys/NIST_SRE08_KEYS.v0.1/trial-keys/model_ids.lst'
     model_key_file_10 = '/home/data/SRE10/export/corpora5/SRE/SRE2010/eval/train/NIST_SRE10_ALL.model.key'    
@@ -113,7 +115,7 @@ def get_sre10_trials_etc():
     
     trials_10 = [[w[0], w[1]+'_'+(w[2]).upper(), w[3]] for w in trials_key_10_subset]
     
-    enroll_xvector_10 = kaldivec2numpydict('/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/xvectors_sre10/xvector_fullpaths.scp')
+    enroll_xvector_10 = kaldivec2numpydict('/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre10/xvector_fullpaths.scp')
     
     enrollmodel2xvector_10 = get_enrollmodel2xvector(model_key_dict_10, all_utts_dict_10, enroll_xvector_10)
     return trials_10, enroll_xvector_10, enrollmodel2xvector_10, all_utts_dict_10
