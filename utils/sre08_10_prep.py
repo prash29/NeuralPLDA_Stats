@@ -115,7 +115,9 @@ def get_sre10_trials_etc():
     
     trials_10 = [[w[0], w[1]+'_'+(w[2]).upper(), w[3]] for w in trials_key_10_subset]
     
-    enroll_xvector_10 = kaldivec2numpydict('/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre10/xvector_fullpaths.scp')
+#    enroll_xvector_10 = kaldivec2numpydict('/home/data2/SRE2019/prashantk/voxceleb/v2/exp/xvector_nnet_1a/stats_sre10/xvector_fullpaths.scp')
     
-    enrollmodel2xvector_10 = get_enrollmodel2xvector(model_key_dict_10, all_utts_dict_10, enroll_xvector_10)
+#    enrollmodel2xvector_10 = get_enrollmodel2xvector(model_key_dict_10, all_utts_dict_10, enroll_xvector_10)
+    enroll_xvector_10 = []
+    enrollmodel2xvector_10 = []
     return trials_10, enroll_xvector_10, enrollmodel2xvector_10, all_utts_dict_10

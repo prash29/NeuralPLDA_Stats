@@ -4,4 +4,5 @@
 logs/*
 **/pickled_files
 pickled_files/*
-
+models/*
+scores/*
